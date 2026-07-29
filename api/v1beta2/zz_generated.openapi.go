@@ -2533,6 +2533,13 @@ func schema_spark_operator_v2_api_v1beta2_SparkApplicationSpec(ref common.Refere
 							Format:      "",
 						},
 					},
+					"parallelism": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Parallelism is the desired executor count, mirroring the role batch/v1.Job's spec.parallelism plays for Kubernetes Jobs. It is not read or enforced by this controller; it exists so that external systems (e.g. Kueue) have a stable, operator-agnostic field to record the desired executor count on, instead of having to know about spec.executor.instances or DynamicAllocation.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
 				},
 				Required: []string{"type", "sparkVersion", "mainApplicationFile", "driver", "executor"},
 			},
