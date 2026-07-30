@@ -10837,6 +10837,15 @@ spec:
                   This field is mutually exclusive with nodeSelector at podSpec level (driver or executor).
                   This field will be deprecated in future versions (at SparkApplicationSpec level).
                 type: object
+              parallelism:
+                description: |-
+                  Parallelism is the desired executor count, mirroring the role batch/v1.Job's
+                  spec.parallelism plays for Kubernetes Jobs. It is not read or enforced by this
+                  controller; it exists so that external systems (e.g. Kueue) have a stable,
+                  operator-agnostic field to record the desired executor count on, instead of
+                  having to know about spec.executor.instances or DynamicAllocation.
+                format: int32
+                type: integer
               proxyUser:
                 description: |-
                   ProxyUser specifies the user to impersonate when submitting the application.

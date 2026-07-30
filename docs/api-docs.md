@@ -676,6 +676,22 @@ created when this field is true AND the operator was started with
 field has no effect when the operator-level gate is off.</p>
 </td>
 </tr>
+<tr>
+<td>
+<code>parallelism</code><br/>
+<em>
+int32
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Parallelism is the desired executor count, mirroring the role batch/v1.Job&rsquo;s
+spec.parallelism plays for Kubernetes Jobs. It is not read or enforced by this
+controller; it exists so that external systems (e.g. Kueue) have a stable,
+operator-agnostic field to record the desired executor count on, instead of
+having to know about spec.executor.instances or DynamicAllocation.</p>
+</td>
+</tr>
 </table>
 </td>
 </tr>
@@ -2806,6 +2822,22 @@ kubectl drain) while the application is running. A PDB is only
 created when this field is true AND the operator was started with
 &ndash;enable-driver-pdb. When unset or false, no PDB is created. The
 field has no effect when the operator-level gate is off.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>parallelism</code><br/>
+<em>
+int32
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Parallelism is the desired executor count, mirroring the role batch/v1.Job&rsquo;s
+spec.parallelism plays for Kubernetes Jobs. It is not read or enforced by this
+controller; it exists so that external systems (e.g. Kueue) have a stable,
+operator-agnostic field to record the desired executor count on, instead of
+having to know about spec.executor.instances or DynamicAllocation.</p>
 </td>
 </tr>
 </tbody>

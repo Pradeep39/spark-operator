@@ -153,6 +153,13 @@ type SparkApplicationSpec struct {
 	// field has no effect when the operator-level gate is off.
 	// +optional
 	DriverPodDisruptionBudget *bool `json:"driverPodDisruptionBudget,omitempty"`
+	// Parallelism is the desired executor count, mirroring the role batch/v1.Job's
+	// spec.parallelism plays for Kubernetes Jobs. It is not read or enforced by this
+	// controller; it exists so that external systems (e.g. Kueue) have a stable,
+	// operator-agnostic field to record the desired executor count on, instead of
+	// having to know about spec.executor.instances or DynamicAllocation.
+	// +optional
+	Parallelism *int32 `json:"parallelism,omitempty"`
 }
 
 // SparkApplicationStatus defines the observed state of SparkApplication
