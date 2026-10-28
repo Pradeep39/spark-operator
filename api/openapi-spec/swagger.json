@@ -14585,6 +14585,11 @@
           "driverInfo"
         ],
         "properties": {
+          "activeExecutors": {
+            "description": "ActiveExecutors is the number of executor pods which are pending, including those held by a scheduling gate, or running, including those being deleted. It is counted from the pods, so it stays exact beyond MaxTrackedExecutorPerApp.",
+            "type": "integer",
+            "format": "int32"
+          },
           "applicationState": {
             "description": "AppState tells the overall application state.",
             "default": {},
@@ -14623,6 +14628,11 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Time"
               }
             ]
+          },
+          "maxExecutorId": {
+            "description": "MaxExecutorID is the highest executor ID seen so far. It never decreases until the status is reset for a new attempt, so it changes with every scale-up.",
+            "type": "integer",
+            "format": "int64"
           },
           "sparkApplicationId": {
             "description": "SparkApplicationID is set by the spark-distribution(via spark.app.id config) on the driver and executor pods",

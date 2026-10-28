@@ -1124,6 +1124,8 @@ var _ = Describe("SparkApplication Controller", func() {
 			app := &v1beta2.SparkApplication{}
 			Expect(k8sClient.Get(ctx, key, app)).NotTo(HaveOccurred())
 			Expect(app.Status.ExecutorState).To(HaveLen(2))
+			Expect(app.Status.ActiveExecutors).To(Equal(ptr.To[int32](2)))
+			Expect(app.Status.MaxExecutorID).To(Equal(ptr.To[int64](2)))
 		})
 
 		It("Should only add 1 executor to the SparkApplication", func() {
@@ -1144,6 +1146,9 @@ var _ = Describe("SparkApplication Controller", func() {
 			app := &v1beta2.SparkApplication{}
 			Expect(k8sClient.Get(ctx, key, app)).NotTo(HaveOccurred())
 			Expect(app.Status.ExecutorState).To(HaveLen(1))
+			// The count and the highest ID are not limited by MaxTrackedExecutorPerApp
+			Expect(app.Status.ActiveExecutors).To(Equal(ptr.To[int32](2)))
+			Expect(app.Status.MaxExecutorID).To(Equal(ptr.To[int64](2)))
 		})
 	})
 
