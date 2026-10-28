@@ -1,5 +1,4 @@
-#
-# Copyright 2024 The Kubeflow authors.
+# Copyright 2024 The Kubeflow Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,10 +20,10 @@ spec:
   type: Python
   pythonVersion: "3"
   mode: cluster
-  image: docker.io/library/spark:4.0.1
+  image: docker.io/apache/spark:4.0.4
   imagePullPolicy: IfNotPresent
   mainApplicationFile: local:///opt/spark/examples/src/main/python/pi.py
-  sparkVersion: 4.0.1
+  sparkVersion: 4.0.4
   sparkConf:
     # Expose Spark metrics for Prometheus
     "spark.kubernetes.driver.annotation.prometheus.io/scrape": "true"

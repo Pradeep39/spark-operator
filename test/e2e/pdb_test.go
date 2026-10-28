@@ -1,11 +1,11 @@
 /*
-Copyright 2026 The Kubeflow authors.
+Copyright 2026 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,8 +18,6 @@ package e2e_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -27,31 +25,12 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/utils/ptr"
 
 	"github.com/kubeflow/spark-operator/v2/api/v1beta2"
 	"github.com/kubeflow/spark-operator/v2/pkg/common"
 	"github.com/kubeflow/spark-operator/v2/pkg/util"
 )
-
-// loadSparkPi parses the canonical spark-pi example and gives the caller a
-// fresh copy. We rename it per-test so two tests can run in the same
-// namespace without colliding.
-func loadSparkPi(name string) *v1beta2.SparkApplication {
-	app := &v1beta2.SparkApplication{}
-	path := filepath.Join("..", "..", "examples", "spark-pi.yaml")
-	file, err := os.Open(path)
-	Expect(err).NotTo(HaveOccurred())
-	defer func() {
-		_ = file.Close()
-	}()
-	Expect(yaml.NewYAMLOrJSONDecoder(file, 100).Decode(app)).NotTo(HaveOccurred())
-	app.Name = name
-	app.ResourceVersion = ""
-	app.UID = ""
-	return app
-}
 
 func driverPDBKey(app *v1beta2.SparkApplication) types.NamespacedName {
 	return types.NamespacedName{Name: util.GetDriverPodName(app), Namespace: app.Namespace}

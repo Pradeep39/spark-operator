@@ -1,3 +1,17 @@
+# Copyright The Kubeflow Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 name: Release Helm charts
 
 on:
@@ -23,7 +37,7 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -35,7 +49,7 @@ jobs:
       - name: Get Helm version
         id: get_helm_version
         run: |
-          HELM_VERSION=$(grep -e '^	helm.sh/helm/v3 v' go.mod | cut -d ' ' -f 2)
+          HELM_VERSION=$(grep -e '^[[:space:]]*helm.sh/helm/v3 v' test/e2e/go.mod | cut -d ' ' -f 2)
           echo "HELM_VERSION=$HELM_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up Helm
@@ -73,7 +87,7 @@ jobs:
           cp *.tgz /tmp/charts
 
       - name: Checkout to branch gh-pages
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 # zizmor: ignore[artipacked]
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.2 # zizmor: ignore[artipacked]
         with:
           ref: gh-pages
           fetch-depth: 0

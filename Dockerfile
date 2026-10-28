@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-ARG SPARK_IMAGE=docker.io/library/spark:4.0.1@sha256:a552a335e0aedb44fa28b20ed7e9dc52c2e856faf87fb0409fb57dbf37b45bf7
+ARG SPARK_IMAGE=docker.io/apache/spark:4.0.4@sha256:94ad730f7510002d8a1615de269f27cdeca4d4eef51657384db3fa9246b5a4d8
 
 FROM docker.io/library/golang:1.25.11@sha256:00feed335fe561979f2cdcc30a5191231977c5631fe79c40f7d3ab63b4fa222f AS builder
 
@@ -31,9 +31,27 @@ ENV GOCACHE=/root/.cache/go-build
 
 ARG TARGETARCH
 
+# Build metadata. When unset, the Makefile derives these from the git tree
+# inside the build context, preserving the behaviour of a plain `docker build`.
+ARG VERSION=
+ARG GIT_COMMIT=
+ARG GIT_TREE_STATE=
+ARG SOURCE_DATE_EPOCH=
+
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=cache,target="/root/.cache/go-build" \
-    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} GO111MODULE=on make build-operator
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} GO111MODULE=on \
+    make build-operator \
+      ${VERSION:+VERSION=$VERSION} \
+      ${GIT_COMMIT:+GIT_COMMIT=$GIT_COMMIT} \
+      ${GIT_TREE_STATE:+GIT_TREE_STATE=$GIT_TREE_STATE} \
+      ${SOURCE_DATE_EPOCH:+SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH}
+
+# Export-only stage. `docker build` targets the final stage by default, so this
+# is never built unless requested via --target=artifacts. CI uses it to extract
+# the exact binary that ships in the image.
+FROM scratch AS artifacts
+COPY --from=builder /workspace/bin/spark-operator /spark-operator
 
 FROM ${SPARK_IMAGE}
 

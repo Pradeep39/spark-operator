@@ -1,11 +1,11 @@
 /*
-Copyright 2024 The Kubeflow authors.
+Copyright 2024 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -440,6 +440,16 @@ var _ = Describe("Example SparkApplication", func() {
 				g.Expect(app.Status.AppState.State).To(Equal(v1beta2.ApplicationStateRunning))
 			}).WithTimeout(5 * time.Second).Should(Succeed())
 
+			By("Waiting for executor pods to be created")
+			Eventually(func(g Gomega) {
+				podList := &corev1.PodList{}
+				g.Expect(k8sClient.List(ctx, podList, client.InNamespace(app.Namespace), client.MatchingLabels{
+					common.LabelSparkAppName: app.Name,
+					common.LabelSparkRole:    common.SparkRoleExecutor,
+				})).To(Succeed())
+				g.Expect(podList.Items).NotTo(BeEmpty())
+			}).WithTimeout(1 * time.Minute).Should(Succeed())
+
 			By("Suspending Spark Application")
 			Eventually(func(g Gomega) {
 				err := clientretry.RetryOnConflict(clientretry.DefaultRetry, func() error {
@@ -458,6 +468,15 @@ var _ = Describe("Example SparkApplication", func() {
 				app := &v1beta2.SparkApplication{}
 				g.Expect(k8sClient.Get(ctx, key, app)).To(Succeed())
 				g.Expect(app.Status.AppState.State).To(Equal(v1beta2.ApplicationStateSuspended))
+			}).WithTimeout(3 * time.Minute).Should(Succeed())
+
+			By("Waiting for driver and executor pods to be garbage collected")
+			Eventually(func(g Gomega) {
+				podList := &corev1.PodList{}
+				g.Expect(k8sClient.List(ctx, podList, client.InNamespace(app.Namespace), client.MatchingLabels{
+					common.LabelSparkAppName: app.Name,
+				})).To(Succeed())
+				g.Expect(podList.Items).To(BeEmpty())
 			}).WithTimeout(3 * time.Minute).Should(Succeed())
 
 			By("Resuming for SparkApplication")

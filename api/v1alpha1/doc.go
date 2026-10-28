@@ -1,11 +1,11 @@
 /*
-Copyright 2025 The Kubeflow authors.
+Copyright 2025 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,9 @@ limitations under the License.
 // +k8s:deepcopy-gen=package,register
 
 // Package v1alpha1 is the v1alpha1 version of the API.
+//
+// SparkConnect uses the sparkoperator.k8s.io/v1alpha1 API. An alpha API can
+// change in a future release.
 // +groupName=sparkoperator.k8s.io
 // +versionName=v1alpha1
 package v1alpha1

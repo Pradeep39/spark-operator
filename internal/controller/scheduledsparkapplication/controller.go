@@ -1,11 +1,11 @@
 /*
-Copyright 2024 The Kubeflow authors.
+Copyright 2024 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -168,18 +168,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	switch scheduledApp.Status.ScheduleState {
-	case v1beta2.ScheduleStateNew:
+	case v1beta2.ScheduleStateNew, v1beta2.ScheduleStateFailedValidation:
 		now := r.clock.Now()
 		oldNextRunTime := scheduledApp.Status.NextRun.Time
 		nextRunTime := schedule.Next(now)
-		if oldNextRunTime.IsZero() || nextRunTime.Before(oldNextRunTime) {
+		if oldNextRunTime.IsZero() || nextRunTime.Before(oldNextRunTime) || scheduledApp.Status.ScheduleState == v1beta2.ScheduleStateFailedValidation {
 			scheduledApp.Status.NextRun = metav1.NewTime(nextRunTime)
 		}
 		scheduledApp.Status.ScheduleState = v1beta2.ScheduleStateScheduled
+		scheduledApp.Status.Reason = ""
 		if err := r.updateScheduledSparkApplicationStatus(ctx, scheduledApp); err != nil {
 			return ctrl.Result{Requeue: true}, err
 		}
-		return ctrl.Result{RequeueAfter: nextRunTime.Sub(now)}, err
+		return ctrl.Result{RequeueAfter: nextRunTime.Sub(now)}, nil
 	case v1beta2.ScheduleStateScheduled:
 		now := r.clock.Now()
 		nextRunTime := scheduledApp.Status.NextRun
@@ -220,8 +221,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{Requeue: true}, err
 		}
 		return ctrl.Result{RequeueAfter: schedule.Next(now).Sub(now)}, nil
-	case v1beta2.ScheduleStateFailedValidation:
-		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -431,6 +430,8 @@ func sortSparkApplicationsInPlace(apps []*v1beta2.SparkApplication) {
 
 // bookkeepPastRuns bookkeeps the past runs of the given SparkApplication slice.
 func bookkeepPastRuns(apps []*v1beta2.SparkApplication, limit int) ([]*v1beta2.SparkApplication, []*v1beta2.SparkApplication) {
+	// A negative limit would make apps[:limit] panic; treat it as 0.
+	limit = max(limit, 0)
 	if len(apps) <= limit {
 		return apps, nil
 	}

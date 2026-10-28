@@ -1,18 +1,18 @@
-{{/*
-Copyright 2024 The Kubeflow authors.
+{{- /*
+Copyright 2024 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-*/}}
+*/ -}}
 
 {{/*
 Create the name of webhook component
@@ -123,6 +123,56 @@ Create the name of the pod disruption budget to be used by webhook
 */}}
 {{- define "spark-operator.webhook.podDisruptionBudgetName" -}}
 {{ include "spark-operator.webhook.name" . }}-pdb
+{{- end -}}
+
+{{/*
+namespaceSelector list for one admission handler.
+
+One LabelSelector cannot express "listed namespaces OR labeled namespaces", so
+when both are set we emit two: names, then labels minus those names (no double
+admission). Empty dict matches all; "" in jobNamespaces is the all-namespaces
+sentinel.
+*/}}
+{{- define "spark-operator.webhook.namespaceSelectors" -}}
+{{- include "spark-operator.spark.validateNamespaceConfig" . -}}
+{{- $ns := .Values.spark.jobNamespaces | default (list) -}}
+{{- $all := has "" $ns -}}
+{{- $concrete := and (gt (len $ns) 0) (not $all) -}}
+{{- $selectors := list -}}
+{{- if $concrete -}}
+{{- $selectors = append $selectors (dict "matchExpressions" (list (dict "key" "kubernetes.io/metadata.name" "operator" "In" "values" $ns))) -}}
+{{- end -}}
+{{- if not $all -}}
+{{- $raw := include "spark-operator.spark.structuredJobNamespaceSelector" . | trim -}}
+{{- if $raw -}}
+{{- $labelSel := fromYaml $raw -}}
+{{- if $concrete -}}
+{{- $exprs := $labelSel.matchExpressions | default (list) -}}
+{{- $exprs = append $exprs (dict "key" "kubernetes.io/metadata.name" "operator" "NotIn" "values" $ns) -}}
+{{- $_ := set $labelSel "matchExpressions" $exprs -}}
+{{- end -}}
+{{- $selectors = append $selectors $labelSel -}}
+{{- end -}}
+{{- end -}}
+{{- if not $selectors -}}
+{{- $selectors = append $selectors (dict) -}}
+{{- end -}}
+{{- toYaml $selectors -}}
+{{- end -}}
+
+{{- define "spark-operator.webhook.selectorName" -}}
+{{- if gt (index . "index" | int) 0 -}}
+{{- printf "%s.selector" (index . "name") -}}
+{{- else -}}
+{{- index . "name" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "spark-operator.webhook.namespaceSelectorBlock" -}}
+{{- if . -}}
+namespaceSelector:
+{{ toYaml . | indent 2 -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

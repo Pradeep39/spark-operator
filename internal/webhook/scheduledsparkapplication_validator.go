@@ -1,11 +1,11 @@
 /*
-Copyright 2024 The Kubeflow authors.
+Copyright 2024 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -96,7 +97,10 @@ func (v *ScheduledSparkApplicationValidator) ValidateDelete(ctx context.Context,
 }
 
 func (v *ScheduledSparkApplicationValidator) validate(app *v1beta2.ScheduledSparkApplication) error {
-	return validateSparkConf(app.Spec.Template.SparkConf, app.Namespace)
+	if err := validateSparkConf(app.Spec.Template.SparkConf, app.Namespace); err != nil {
+		return err
+	}
+	return validateConfigMaps(&app.Spec.Template, field.NewPath("spec", "template"))
 }
 
 // validateName ensures the ScheduledSparkApplication metadata.name, when combined with suffixes,

@@ -563,9 +563,6 @@ func TestExecutorPodTemplateContents(t *testing.T) {
 		"no pod template": {
 			app: &v1beta2.SparkApplication{},
 			expectedTemplate: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: []metav1.OwnerReference{appNonControllerOwnerReference},
-				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
 						Name: common.Spark3DefaultExecutorContainerName,
@@ -596,7 +593,6 @@ func TestExecutorPodTemplateContents(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					OwnerReferences: []metav1.OwnerReference{
 						{Name: "owner-in-template"},
-						appNonControllerOwnerReference,
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -666,7 +662,7 @@ func TestBuildSparkSubmitArgsSkipPodTemplates(t *testing.T) {
 			Mode:                v1beta2.DeployModeCluster,
 			MainApplicationFile: ptr.To("local:///app.jar"),
 			MainClass:           ptr.To("org.example.Main"),
-			SparkVersion:        "4.0.1",
+			SparkVersion:        "4.0.4",
 		},
 		Status: v1beta2.SparkApplicationStatus{
 			SubmissionID: "sub-123",

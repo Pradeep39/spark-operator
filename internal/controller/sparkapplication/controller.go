@@ -1,11 +1,11 @@
 /*
-Copyright 2024 The Kubeflow authors.
+Copyright 2024 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -78,6 +78,15 @@ type Options struct {
 	// When false, the reconciler will not create or delete a PDB regardless of
 	// the SparkApplication spec. Defaults to false.
 	EnableDriverPDB bool
+
+	// DefaultTimeToLiveSeconds is the normalized operator-wide default TTL (in seconds)
+	// applied to terminated SparkApplications that do not set spec.timeToLiveSeconds when
+	// the value is > 0. It is a cleanup-only fallback and never modifies the spec.
+	DefaultTimeToLiveSeconds int64
+
+	// DefaultServiceAccount is the name of the service account used by the driver pod
+	// when the SparkApplication does not specify one. An empty value disables the fallback.
+	DefaultServiceAccount string
 }
 
 // Reconciler reconciles a SparkApplication object.
@@ -119,8 +128,10 @@ func NewReconciler(
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;update;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;update;patch
 // +kubebuilder:rbac:groups=extensions,resources=ingresses,verbs=get;create;update;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;create;update;delete
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=create;patch
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get
 // +kubebuilder:rbac:groups=sparkoperator.k8s.io,resources=sparkapplications,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups=sparkoperator.k8s.io,resources=sparkapplications/status,verbs=update
@@ -200,6 +211,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	logger.Info("Reconciling SparkApplication", "state", app.Status.AppState.State)
 	defer logger.Info("Finished reconciling SparkApplication")
 
+	if app.Spec.ManagedBy != nil && *app.Spec.ManagedBy != common.SparkOperatorManagerName {
+		logger.Info(
+			"Skipping reconciliation: managed by external controller",
+			"managedBy", *app.Spec.ManagedBy,
+		)
+		return ctrl.Result{}, nil
+	}
+
 	// Check if the spark application is being deleted
 	if !app.DeletionTimestamp.IsZero() {
 		return r.handleSparkApplicationDeletion(ctx, req)
@@ -269,6 +288,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager, options controller.Optio
 		mgr.GetEventRecorder("spark-application-event-handler"),
 		r.options.Namespaces,
 		r.options.NamespaceSelector,
+		r.options.DefaultTimeToLiveSeconds,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create spark application event filter: %v", err)
@@ -714,8 +734,15 @@ func (r *Reconciler) reconcileTerminatedSparkApplication(ctx context.Context, re
 		return ctrl.Result{}, nil
 	}
 
-	if util.IsExpired(app) {
-		logger.Info("Deleting expired SparkApplication", "state", app.Status.AppState.State)
+	effectiveTTLSeconds, usedDefault := util.EffectiveTimeToLiveSeconds(app, r.options.DefaultTimeToLiveSeconds)
+
+	if util.IsExpired(app, effectiveTTLSeconds) {
+		if usedDefault {
+			logger.Info("Deleting expired SparkApplication using operator default TTL",
+				"ttlSeconds", *effectiveTTLSeconds, "state", app.Status.AppState.State)
+		} else {
+			logger.Info("Deleting expired SparkApplication", "state", app.Status.AppState.State)
+		}
 		if err := r.client.Delete(ctx, app); err != nil {
 			return ctrl.Result{Requeue: true}, err
 		}
@@ -735,14 +762,14 @@ func (r *Reconciler) reconcileTerminatedSparkApplication(ctx context.Context, re
 		return ctrl.Result{Requeue: true}, err
 	}
 
-	// If termination time or TTL is not set, will not requeue this application.
-	if app.Status.TerminationTime.IsZero() || app.Spec.TimeToLiveSeconds == nil || *app.Spec.TimeToLiveSeconds <= 0 {
+	// If termination time or effective TTL is not set, will not requeue this application.
+	if app.Status.TerminationTime.IsZero() || effectiveTTLSeconds == nil || *effectiveTTLSeconds <= 0 {
 		return ctrl.Result{}, nil
 	}
 
 	// Otherwise, requeue the application for subsequent deletion.
 	now := time.Now()
-	ttl := time.Duration(*app.Spec.TimeToLiveSeconds) * time.Second
+	ttl := time.Duration(*effectiveTTLSeconds) * time.Second
 	survival := now.Sub(app.Status.TerminationTime.Time)
 
 	// If survival time is greater than TTL, requeue the application immediately.
@@ -991,7 +1018,15 @@ func (r *Reconciler) submitSparkApplication(ctx context.Context, app *v1beta2.Sp
 		}
 	}()
 
-	if err := r.submitter.Submit(ctx, app); err != nil {
+	// Fall back to the operator-level default service account when neither the SparkApplication
+	// nor its driver pod template specifies one. This is applied to a copy of the application so
+	// that the fallback is never written back to the custom resource.
+	submitApp := util.ApplyDefaultDriverServiceAccount(app, r.options.DefaultServiceAccount)
+	if submitApp != app {
+		logger.Info("Applied default driver service account", "serviceAccount", r.options.DefaultServiceAccount)
+	}
+
+	if err := r.submitter.Submit(ctx, submitApp); err != nil {
 		r.recordSparkApplicationEvent(app)
 		submitErr = fmt.Errorf("failed to submit spark application: %v", err)
 		return
@@ -1137,10 +1172,11 @@ func (r *Reconciler) updateExecutorState(ctx context.Context, app *v1beta2.Spark
 		_, exists := executorStateMap[name]
 		if !util.IsExecutorTerminated(oldStatus) && !exists {
 			if !util.IsDriverRunning(app) {
-				// If ApplicationState is COMPLETED, in other words, the driver pod has been completed
+				// If ApplicationState is SUCCEEDING or COMPLETED, in other words, the driver pod has been completed
 				// successfully. The executor pods terminate and are cleaned up, so we could not found
 				// the executor pod, under this circumstances, we assume the executor pod are completed.
-				if app.Status.AppState.State == v1beta2.ApplicationStateCompleted {
+				if app.Status.AppState.State == v1beta2.ApplicationStateSucceeding ||
+					app.Status.AppState.State == v1beta2.ApplicationStateCompleted {
 					app.Status.ExecutorState[name] = v1beta2.ExecutorStateCompleted
 				} else {
 					logger.Info("Executor pod not found, assuming it was deleted", "name", name)
@@ -1562,9 +1598,6 @@ func (r *Reconciler) cleanUpOnTermination(ctx context.Context, _, newApp *v1beta
 // cleanUpPodTemplateFiles cleans up the driver and executor pod template files.
 func (r *Reconciler) cleanUpPodTemplateFiles(ctx context.Context, app *v1beta2.SparkApplication) error {
 	logger := log.FromContext(ctx)
-	if app.Spec.Driver.Template == nil && app.Spec.Executor.Template == nil {
-		return nil
-	}
 	path := fmt.Sprintf("/tmp/spark/%s", app.Status.SubmissionID)
 	if err := os.RemoveAll(path); err != nil {
 		if !os.IsNotExist(err) {

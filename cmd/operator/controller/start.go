@@ -1,11 +1,11 @@
 /*
-Copyright 2024 The Kubeflow authors.
+Copyright 2024 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -44,6 +45,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -86,6 +88,7 @@ var (
 	controllerThreads        int
 	cacheSyncTimeout         time.Duration
 	maxTrackedExecutorPerApp int
+	defaultTimeToLiveSeconds int64
 
 	// Driver PDB feature gate. When enabled, the controller creates a
 	// PodDisruptionBudget for each SparkApplication that sets
@@ -102,6 +105,10 @@ var (
 	enableBatchScheduler  bool
 	kubeSchedulerNames    []string
 	defaultBatchScheduler string
+
+	// Fallback service account for Spark driver pods when the custom resource does
+	// not specify one. Empty by default, which preserves existing behavior.
+	defaultServiceAccount string
 
 	// Spark web UI service and ingress
 	enableUIService    bool
@@ -193,6 +200,18 @@ func NewStartCommand() *cobra.Command {
 				}
 			}
 
+			// A negative TTL is never meaningful; reject it regardless of the gate.
+			// Zero is the valid "off" sentinel and is left untouched.
+			if defaultTimeToLiveSeconds < 0 {
+				return fmt.Errorf("invalid value %d for --default-time-to-live-seconds, must not be negative", defaultTimeToLiveSeconds)
+			}
+
+			if defaultServiceAccount != "" {
+				if errs := validation.IsDNS1123Subdomain(defaultServiceAccount); len(errs) > 0 {
+					return fmt.Errorf("invalid value %q for --default-service-account: %s", defaultServiceAccount, strings.Join(errs, ", "))
+				}
+			}
+
 			return nil
 		},
 		Run: func(_ *cobra.Command, args []string) {
@@ -206,6 +225,14 @@ func NewStartCommand() *cobra.Command {
 	command.Flags().StringVar(&namespaceSelector, "namespace-selector", "", "Label selector for namespaces to watch (e.g., 'spark-operator=enabled,env in (prod,staging)'). Namespaces matching this selector will be watched in addition to those specified via --namespaces. Requires ClusterRole permission to list and watch namespaces.")
 	command.Flags().DurationVar(&cacheSyncTimeout, "cache-sync-timeout", 30*time.Second, "Informer cache sync timeout.")
 	command.Flags().IntVar(&maxTrackedExecutorPerApp, "max-tracked-executor-per-app", 1000, "The maximum number of tracked executors per SparkApplication.")
+	command.Flags().Int64Var(&defaultTimeToLiveSeconds, "default-time-to-live-seconds", 0,
+		"Default Time-To-Live in seconds applied to terminated SparkApplications that do "+
+			"not set spec.timeToLiveSeconds. Requires the DefaultTimeToLive feature gate. "+
+			"0 (default) disables it; a negative value is rejected.")
+	command.Flags().StringVar(&defaultServiceAccount, "default-service-account", "",
+		"The service account used by the Spark driver pod and the Spark Connect server pod "+
+			"when neither the custom resource nor its pod template specifies one. Leave empty "+
+			"to disable the fallback, in which case the namespace's default service account is used.")
 	command.Flags().BoolVar(&enableDriverPDB, "enable-driver-pdb", false,
 		"Enable creation of a PodDisruptionBudget for Spark driver pods. "+
 			"Each SparkApplication must additionally opt in via "+
@@ -286,6 +313,16 @@ func NewStartCommand() *cobra.Command {
 func start() {
 	setupLog()
 
+	// Normalize the configured TTL before passing it to the controller so downstream
+	// cleanup logic does not need to depend on the global feature gate.
+	if !features.Enabled(features.DefaultTimeToLive) {
+		if defaultTimeToLiveSeconds > 0 {
+			logger.Info("Ignoring --default-time-to-live-seconds because the DefaultTimeToLive feature gate is disabled",
+				"defaultTimeToLiveSeconds", defaultTimeToLiveSeconds)
+		}
+		defaultTimeToLiveSeconds = 0
+	}
+
 	// Create the client rest config. Use kubeConfig if given, otherwise assume in-cluster.
 	cfg, err := ctrl.GetConfig()
 	cfg.WarningHandler = rest.NoWarnings{}
@@ -298,7 +335,7 @@ func start() {
 	cfg.Burst = kubeAPIBurst
 
 	// Create the manager.
-	tlsOptions, err := operatortls.SetupTLS(tlsMinVersion, tlsCipherSuites)
+	tlsOptions, err := operatortls.SetupTLS("metric", tlsMinVersion, tlsCipherSuites)
 	if err != nil {
 		logger.Error(err, "Failed to set up TLS")
 		os.Exit(1)
@@ -543,6 +580,8 @@ func newSparkApplicationReconcilerOptions() sparkapplication.Options {
 		SparkExecutorMetrics:         sparkExecutorMetrics,
 		MaxTrackedExecutorPerApp:     maxTrackedExecutorPerApp,
 		EnableDriverPDB:              enableDriverPDB,
+		DefaultTimeToLiveSeconds:     defaultTimeToLiveSeconds,
+		DefaultServiceAccount:        defaultServiceAccount,
 	}
 	if enableBatchScheduler {
 		options.KubeSchedulerNames = kubeSchedulerNames
@@ -561,8 +600,9 @@ func newScheduledSparkApplicationReconcilerOptions() scheduledsparkapplication.O
 
 func newSparkConnectReconcilerOptions() sparkconnect.Options {
 	options := sparkconnect.Options{
-		Namespaces:        namespaces,
-		NamespaceSelector: namespaceSelector,
+		Namespaces:            namespaces,
+		NamespaceSelector:     namespaceSelector,
+		DefaultServiceAccount: defaultServiceAccount,
 	}
 	return options
 }

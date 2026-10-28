@@ -1,11 +1,11 @@
 /*
-Copyright 2024 The kubeflow authors.
+Copyright 2024 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,6 +30,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/kubeflow/spark-operator/v2/api/v1beta2"
+	"github.com/kubeflow/spark-operator/v2/pkg/common"
 	"github.com/kubeflow/spark-operator/v2/pkg/features"
 	"github.com/kubeflow/spark-operator/v2/pkg/util"
 )
@@ -123,25 +124,27 @@ func (f *sparkPodEventFilter) filter(pod *corev1.Pod) bool {
 }
 
 type EventFilter struct {
-	client           client.Client
-	recorder         events.EventRecorder
-	namespaceMatcher *util.NamespaceMatcher
-	logger           logr.Logger
+	client                   client.Client
+	recorder                 events.EventRecorder
+	namespaceMatcher         *util.NamespaceMatcher
+	logger                   logr.Logger
+	defaultTimeToLiveSeconds int64
 }
 
 var _ predicate.Predicate = &EventFilter{}
 
-func NewSparkApplicationEventFilter(client client.Client, recorder events.EventRecorder, namespaces []string, namespaceSelector string) (*EventFilter, error) {
+func NewSparkApplicationEventFilter(client client.Client, recorder events.EventRecorder, namespaces []string, namespaceSelector string, defaultTimeToLiveSeconds int64) (*EventFilter, error) {
 	matcher, err := util.NewNamespaceMatcher(namespaces, namespaceSelector)
 	if err != nil {
 		return nil, err
 	}
 
 	return &EventFilter{
-		client:           client,
-		recorder:         recorder,
-		namespaceMatcher: matcher,
-		logger:           log.Log.WithName("spark-application-event-filter"),
+		client:                   client,
+		recorder:                 recorder,
+		namespaceMatcher:         matcher,
+		logger:                   log.Log.WithName("spark-application-event-filter"),
+		defaultTimeToLiveSeconds: defaultTimeToLiveSeconds,
 	}, nil
 }
 
@@ -171,7 +174,17 @@ func (f *EventFilter) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	if oldApp.ResourceVersion == newApp.ResourceVersion && !util.IsExpired(newApp) && !util.ShouldRetry(newApp) {
+	if newApp.Spec.ManagedBy != nil && *newApp.Spec.ManagedBy != common.SparkOperatorManagerName {
+		return false
+	}
+
+	// On a no-op resync (same ResourceVersion), only re-admit the event when the
+	// application still needs action: it is expired (needs deletion) or should
+	// retry. Expiry uses the effective TTL so that an app expired via the
+	// operator default TTL is reconciled for deletion, consistent with the
+	// controller's own cleanup decision.
+	effectiveTTLSeconds, _ := util.EffectiveTimeToLiveSeconds(newApp, f.defaultTimeToLiveSeconds)
+	if oldApp.ResourceVersion == newApp.ResourceVersion && !util.IsExpired(newApp, effectiveTTLSeconds) && !util.ShouldRetry(newApp) {
 		return false
 	}
 

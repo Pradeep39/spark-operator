@@ -1,11 +1,11 @@
 /*
-Copyright 2025 The Kubeflow authors.
+Copyright 2025 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -179,5 +179,17 @@ func TestScheduledSparkApplicationValidatorValidateName(t *testing.T) {
 				t.Errorf("validateName(%q) should return a non-empty error message, got: %v", tt.appName, err)
 			}
 		})
+	}
+}
+
+func TestScheduledSparkApplicationValidatorValidateCreate_ConfigMapNames(t *testing.T) {
+	validator := NewScheduledSparkApplicationValidator()
+
+	app := newScheduledSparkApplication()
+	app.Spec.Template.Driver.ConfigMaps = configMapRefs("MY_CONFIG")
+
+	_, err := validator.ValidateCreate(context.Background(), app)
+	if err == nil || !strings.Contains(err.Error(), `spec.template.driver.configMaps[0].name has invalid ConfigMap name "MY_CONFIG"`) {
+		t.Fatalf("expected an invalid ConfigMap name error, got %v", err)
 	}
 }

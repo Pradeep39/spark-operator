@@ -1,11 +1,11 @@
 /*
-Copyright 2025 The Kubeflow authors.
+Copyright 2025 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -49,6 +49,15 @@ const (
 	// owner: @venkomirisetti
 	// alpha: v2.6.0
 	RestSubmitter featuregate.Feature = "RestSubmitter"
+
+	// DefaultTimeToLive enables applying an operator-configured default TTL to
+	// terminated SparkApplications that do not set spec.timeToLiveSeconds. The
+	// value is used only for the cleanup decision (a runtime fallback) and never
+	// mutates the object.
+	//
+	// owner: @dineshkumar181094
+	// alpha: v2.6.0
+	DefaultTimeToLive featuregate.Feature = "DefaultTimeToLive"
 )
 
 // To add a new feature gate, follow these steps:
@@ -91,6 +100,8 @@ var defaultFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
 	LoadSparkDefaults: {Default: false, PreRelease: featuregate.Alpha},
 
 	RestSubmitter: {Default: false, PreRelease: featuregate.Alpha},
+
+	DefaultTimeToLive: {Default: false, PreRelease: featuregate.Alpha},
 }
 
 // SetFeatureGateDuringTest sets the specified feature gate to the specified value during a test.

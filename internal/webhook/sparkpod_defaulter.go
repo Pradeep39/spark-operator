@@ -1,11 +1,11 @@
 /*
-Copyright 2024 The Kubeflow authors.
+Copyright 2024 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ package webhook
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"reflect"
 	"slices"
@@ -44,28 +45,15 @@ const (
 
 // SparkPodDefaulter defaults Spark pods.
 type SparkPodDefaulter struct {
-	client             client.Client
-	sparkJobNamespaces map[string]bool
+	client client.Client
 }
 
 // SparkPodDefaulter implements admission.CustomDefaulter.
 var _ admission.Defaulter[*corev1.Pod] = &SparkPodDefaulter{}
 
 // NewSparkPodDefaulter creates a new SparkPodDefaulter instance.
-func NewSparkPodDefaulter(client client.Client, namespaces []string) *SparkPodDefaulter {
-	nsMap := make(map[string]bool)
-	if len(namespaces) == 0 {
-		nsMap[metav1.NamespaceAll] = true
-	} else {
-		for _, ns := range namespaces {
-			nsMap[ns] = true
-		}
-	}
-
-	return &SparkPodDefaulter{
-		client:             client,
-		sparkJobNamespaces: nsMap,
-	}
+func NewSparkPodDefaulter(client client.Client) *SparkPodDefaulter {
+	return &SparkPodDefaulter{client: client}
 }
 
 // Default implements admission.Defaulter.
@@ -76,9 +64,6 @@ func (d *SparkPodDefaulter) Default(ctx context.Context, pod *corev1.Pod) error 
 
 	logger := log.FromContext(ctx)
 	namespace := pod.Namespace
-	if !d.isSparkJobNamespace(namespace) {
-		return nil
-	}
 
 	appName := pod.Labels[common.LabelSparkAppName]
 	if appName == "" {
@@ -128,10 +113,6 @@ func addMemoryLimit(pod *corev1.Pod, app *v1beta2.SparkApplication) error {
 	// Apply the memory limit to the container's resources
 	pod.Spec.Containers[i].Resources.Limits[corev1.ResourceMemory] = limitQuantity
 	return nil
-}
-
-func (d *SparkPodDefaulter) isSparkJobNamespace(ns string) bool {
-	return d.sparkJobNamespaces[metav1.NamespaceAll] || d.sparkJobNamespaces[ns]
 }
 
 type mutateSparkPodOption func(pod *corev1.Pod, app *v1beta2.SparkApplication) error
@@ -334,15 +315,14 @@ func addGeneralConfigMaps(pod *corev1.Pod, app *v1beta2.SparkApplication) error 
 		configMaps = app.Spec.Executor.ConfigMaps
 	}
 
-	logger := log.FromContext(context.TODO())
+	addedVolumes := make(map[string]bool, len(configMaps))
 	for _, namePath := range configMaps {
-		volumeName := namePath.Name + "-vol"
-		if len(volumeName) > maxNameLength {
-			volumeName = volumeName[0:maxNameLength]
-			logger.Info("ConfigMap volume name is too long. Truncating", "result", volumeName)
-		}
-		if err := addConfigMapVolume(pod, namePath.Name, volumeName); err != nil {
-			return err
+		volumeName := getConfigMapVolumeName(namePath.Name)
+		if !addedVolumes[namePath.Name] {
+			if err := addConfigMapVolume(pod, namePath.Name, volumeName); err != nil {
+				return err
+			}
+			addedVolumes[namePath.Name] = true
 		}
 
 		if err := addConfigMapVolumeMount(pod, volumeName, namePath.Path); err != nil {
@@ -350,6 +330,26 @@ func addGeneralConfigMaps(pod *corev1.Pod, app *v1beta2.SparkApplication) error 
 		}
 	}
 	return nil
+}
+
+func getConfigMapVolumeName(configMapName string) string {
+	const volumeSuffix = "-vol"
+	preferredName := configMapName + volumeSuffix
+	if len(preferredName) <= maxNameLength && !strings.Contains(preferredName, ".") {
+		return preferredName
+	}
+
+	// ConfigMap names are DNS subdomains and may contain dots, while volume names
+	// must be DNS labels. Add a hash so sanitizing or truncating stays unique.
+	sanitizedName := strings.ReplaceAll(configMapName, ".", "-")
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(configMapName)))[:8]
+	hashedSuffix := "-" + hash + volumeSuffix
+	maxPrefixLength := maxNameLength - len(hashedSuffix)
+	if len(sanitizedName) > maxPrefixLength {
+		sanitizedName = sanitizedName[:maxPrefixLength]
+	}
+	sanitizedName = strings.TrimRight(sanitizedName, "-")
+	return sanitizedName + hashedSuffix
 }
 
 func addPrometheusConfig(pod *corev1.Pod, app *v1beta2.SparkApplication) error {
@@ -367,7 +367,7 @@ func addPrometheusConfig(pod *corev1.Pod, app *v1beta2.SparkApplication) error {
 	}
 
 	name := util.GetPrometheusConfigMapName(app)
-	volumeName := name + "-vol"
+	volumeName := getConfigMapVolumeName(name)
 	mountPath := common.PrometheusConfigMapMountPath
 	promPort := common.DefaultPrometheusJavaAgentPort
 	if app.Spec.Monitoring.Prometheus.Port != nil {

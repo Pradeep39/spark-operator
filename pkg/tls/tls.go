@@ -1,11 +1,11 @@
 /*
-Copyright 2026 The Kubeflow authors.
+Copyright 2026 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,12 +23,14 @@ import (
 )
 
 // SetupTLS parses the TLS flags and returns TLS option functions for webhook and metrics servers.
-func SetupTLS(minVersion string, cipherSuites []string) ([]func(*cryptotls.Config), error) {
+// flagPrefix is the prefix of the TLS flags the values came from (e.g. "webhook" for
+// --webhook-tls-min-version), so that errors name the flag the user actually set.
+func SetupTLS(flagPrefix, minVersion string, cipherSuites []string) ([]func(*cryptotls.Config), error) {
 	var tlsOpts []func(*cryptotls.Config)
 
 	ver, err := ParseTLSVersion(minVersion)
 	if err != nil {
-		return nil, fmt.Errorf("invalid --tls-min-version %q: %w", minVersion, err)
+		return nil, fmt.Errorf("invalid --%s-tls-min-version %q: %w", flagPrefix, minVersion, err)
 	}
 	tlsOpts = append(tlsOpts, func(c *cryptotls.Config) {
 		c.MinVersion = ver
@@ -37,7 +39,7 @@ func SetupTLS(minVersion string, cipherSuites []string) ([]func(*cryptotls.Confi
 	if len(cipherSuites) > 0 {
 		cipherIDs, err := ParseCipherSuites(cipherSuites)
 		if err != nil {
-			return nil, fmt.Errorf("invalid --tls-cipher-suites: %w", err)
+			return nil, fmt.Errorf("invalid --%s-tls-cipher-suites: %w", flagPrefix, err)
 		}
 		tlsOpts = append(tlsOpts, func(c *cryptotls.Config) {
 			c.CipherSuites = cipherIDs

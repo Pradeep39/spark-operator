@@ -1,11 +1,11 @@
 /*
-Copyright 2025 The Kubeflow authors.
+Copyright The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,12 +18,15 @@ limitations under the License.
 package api
 
 import (
+	v1alpha1 "github.com/kubeflow/spark-operator/v2/pkg/client/informers/externalversions/api/v1alpha1"
 	v1beta2 "github.com/kubeflow/spark-operator/v2/pkg/client/informers/externalversions/api/v1beta2"
 	internalinterfaces "github.com/kubeflow/spark-operator/v2/pkg/client/informers/externalversions/internalinterfaces"
 )
 
 // Interface provides access to each of this group's versions.
 type Interface interface {
+	// V1alpha1 provides access to shared informers for resources in V1alpha1.
+	V1alpha1() v1alpha1.Interface
 	// V1beta2 provides access to shared informers for resources in V1beta2.
 	V1beta2() v1beta2.Interface
 }
@@ -37,6 +40,11 @@ type group struct {
 // New returns a new Interface.
 func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc) Interface {
 	return &group{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
+}
+
+// V1alpha1 returns a new v1alpha1.Interface.
+func (g *group) V1alpha1() v1alpha1.Interface {
+	return v1alpha1.New(g.factory, g.namespace, g.tweakListOptions)
 }
 
 // V1beta2 returns a new v1beta2.Interface.

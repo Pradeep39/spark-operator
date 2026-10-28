@@ -1,5 +1,4 @@
-#
-# Copyright 2024 The Kubeflow authors.
+# Copyright 2024 The Kubeflow Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,11 +20,11 @@ metadata:
 spec:
   type: Scala
   mode: cluster
-  image: spark:4.0.1
+  image: apache/spark:4.0.4
   imagePullPolicy: IfNotPresent
   mainClass: dummy
   mainApplicationFile: local:///dummy.jar
-  sparkVersion: 4.0.1
+  sparkVersion: 4.0.4
   restartPolicy:
     type: OnFailure
     onSubmissionFailureRetries: 3

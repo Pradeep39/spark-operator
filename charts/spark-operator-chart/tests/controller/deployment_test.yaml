@@ -1,18 +1,16 @@
-#
-# Copyright 2024 The Kubeflow authors.
+# Copyright 2024 The Kubeflow Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     https://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
 suite: Test controller deployment
 
@@ -168,6 +166,40 @@ tests:
           path: spec.template.spec.containers[?(@.name=="spark-operator-controller")].args
           content: --namespaces=""
 
+  - it: Should render object jobNamespaceSelector as --namespace-selector
+    set:
+      spark:
+        jobNamespaceSelector:
+          matchLabels:
+            env: prod
+            spark: enabled
+          matchExpressions:
+            - key: tier
+              operator: In
+              values:
+                - prod
+                - staging
+            - key: canary
+              operator: Exists
+            - key: legacy
+              operator: DoesNotExist
+            - key: debug
+              operator: NotIn
+              values:
+                - "true"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name=="spark-operator-controller")].args
+          content: --namespace-selector=env=prod,spark=enabled,tier in (prod,staging),canary,!legacy,debug notin (true)
+
+  - it: Should fail if jobNamespaceSelector is a string
+    set:
+      spark:
+        jobNamespaceSelector: "spark=enabled"
+    asserts:
+      - failedTemplate:
+          errorMessage: "spark.jobNamespaceSelector no longer accepts a string; use an object with matchLabels/matchExpressions (breaking change in v2.6.0)"
+
   - it: Should contain `--controller-threads` arg if `controller.workers` is set
     set:
       controller:
@@ -176,6 +208,63 @@ tests:
       - contains:
           path: spec.template.spec.containers[?(@.name=="spark-operator-controller")].args
           content: --controller-threads=30
+
+  - it: Should contain `--default-time-to-live-seconds` arg if `controller.defaultTimeToLiveSeconds` is set and the `DefaultTimeToLive` feature gate is enabled
+    set:
+      controller:
+        defaultTimeToLiveSeconds: 86400
+        featureGates:
+          - name: DefaultTimeToLive
+            enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name=="spark-operator-controller")].args
+          content: --default-time-to-live-seconds=86400
+
+  - it: Should not contain `--default-time-to-live-seconds` arg when the `DefaultTimeToLive` feature gate is disabled even if `controller.defaultTimeToLiveSeconds` is set
+    set:
+      controller:
+        defaultTimeToLiveSeconds: 86400
+        featureGates:
+          - name: DefaultTimeToLive
+            enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[?(@.name=="spark-operator-controller")].args
+          content: --default-time-to-live-seconds=86400
+
+  - it: Should not contain `--default-time-to-live-seconds` arg when the `DefaultTimeToLive` feature gate is not set even if `controller.defaultTimeToLiveSeconds` is set
+    set:
+      controller:
+        defaultTimeToLiveSeconds: 86400
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[?(@.name=="spark-operator-controller")].args
+          content: --default-time-to-live-seconds=86400
+
+  - it: Should contain `--default-time-to-live-seconds=0` arg when `controller.defaultTimeToLiveSeconds` is 0 and the `DefaultTimeToLive` feature gate is enabled
+    set:
+      controller:
+        defaultTimeToLiveSeconds: 0
+        featureGates:
+          - name: DefaultTimeToLive
+            enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name=="spark-operator-controller")].args
+          content: --default-time-to-live-seconds=0
+
+  - it: Should not contain `--default-time-to-live-seconds` arg when `controller.defaultTimeToLiveSeconds` is negative and the `DefaultTimeToLive` feature gate is enabled
+    set:
+      controller:
+        defaultTimeToLiveSeconds: -1
+        featureGates:
+          - name: DefaultTimeToLive
+            enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[?(@.name=="spark-operator-controller")].args
+          content: --default-time-to-live-seconds=-1
 
   - it: Should contain `--enable-ui-service` arg if `controller.uiService.enable` is set to `true`
     set:
@@ -281,6 +370,24 @@ tests:
           path: spec.template.spec.containers[?(@.name=="spark-operator-controller")].args
           content: --default-batch-scheduler=yunikorn
 
+  - it: Should contain `--default-service-account` arg if `controller.defaultServiceAccount` is set
+    set:
+      controller:
+        defaultServiceAccount: spark-operator-spark
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name=="spark-operator-controller")].args
+          content: --default-service-account=spark-operator-spark
+
+  - it: Should not contain `--default-service-account` arg if `controller.defaultServiceAccount` is empty
+    set:
+      controller:
+        defaultServiceAccount: ""
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[?(@.name=="spark-operator-controller")].args
+          content: --default-service-account=
+  
   - it: Should contain `--enable-metrics` arg if `prometheus.metrics.enable` is set to `true`
     set:
       prometheus:

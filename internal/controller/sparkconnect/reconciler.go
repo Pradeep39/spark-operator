@@ -1,11 +1,11 @@
 /*
-Copyright 2025 The Kubeflow authors.
+Copyright 2025 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@ package sparkconnect
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -52,6 +53,22 @@ const (
 	ExecutorPodTemplateFileName = "executor-pod-template.yaml"
 
 	sparkConnectServerPort = 15002
+
+	// sparkConnectServerProcessName is passed as $0 to the entrypoint shell so that
+	// shell diagnostics are attributed to a meaningful name.
+	sparkConnectServerProcessName = "spark-connect-server"
+
+	// sparkConnectServerEntrypointScript starts the Spark Connect server with the
+	// arguments it receives. It contains no user-supplied data: POD_IP is read from
+	// the downward API and wrapped in brackets when it is an IPv6 address, and the
+	// generated options are forwarded verbatim through "$@".
+	sparkConnectServerEntrypointScript = `host="${POD_IP}"
+case "${host}" in
+\[*) ;;
+*:*) host="[${host}]" ;;
+esac
+exec "${SPARK_HOME}/sbin/start-connect-server.sh" "$@" --conf "spark.driver.host=${host}"
+`
 )
 
 // Options defines the options of SparkConnect reconciler.
@@ -59,6 +76,11 @@ type Options struct {
 	// A list of namespaces that should be watched.
 	Namespaces        []string
 	NamespaceSelector string
+
+	// DefaultServiceAccount is the name of the service account used by the Spark Connect
+	// server pod when neither the SparkConnect nor its server pod template specifies one.
+	// An empty value disables the fallback.
+	DefaultServiceAccount string
 }
 
 // Reconciler reconciles a SparkConnect object.
@@ -341,14 +363,24 @@ func (r *Reconciler) createOrUpdateServerPod(ctx context.Context, conn *v1alpha1
 }
 
 // mutateServerPod mutates the server pod for SparkConnect.
-func (r *Reconciler) mutateServerPod(_ context.Context, conn *v1alpha1.SparkConnect, pod *corev1.Pod) error {
+func (r *Reconciler) mutateServerPod(ctx context.Context, conn *v1alpha1.SparkConnect, pod *corev1.Pod) error {
 	// Server pod not created yet.
 	if pod.CreationTimestamp.IsZero() {
-		template := conn.Spec.Server.Template
+		template := conn.Spec.Server.Template.DeepCopy()
 		if template != nil {
-			pod.Labels = template.Labels
-			pod.Annotations = template.Annotations
-			pod.Spec = template.Spec
+			// Deep copy the template fields onto the pod. The pod is mutated below, so assigning
+			// the maps and spec directly would write those mutations back into the template.
+			pod.Labels = maps.Clone(template.Labels)
+			pod.Annotations = maps.Clone(template.Annotations)
+			template.Spec.DeepCopyInto(&pod.Spec)
+		}
+
+		// Fall back to the operator-level default service account. This must happen after the
+		// pod template has been copied above, which would otherwise overwrite it.
+		if pod.Spec.ServiceAccountName == "" && r.options.DefaultServiceAccount != "" {
+			pod.Spec.ServiceAccountName = r.options.DefaultServiceAccount
+			ctrl.LoggerFrom(ctx).Info("Applied default service account to Spark Connect server pod",
+				"serviceAccount", r.options.DefaultServiceAccount)
 		}
 
 		// Add a default server container if not specified.
@@ -358,17 +390,24 @@ func (r *Reconciler) mutateServerPod(_ context.Context, conn *v1alpha1.SparkConn
 			})
 		}
 
-		index := 0
-		for i, container := range pod.Spec.Containers {
-			if container.Name == common.SparkDriverContainerName {
-				index = i
-				break
-			}
-		}
-
 		// Build Spark connect server container.
-		container := &pod.Spec.Containers[index]
+		container := util.GetContainerByNameOrFirst(
+			pod.Spec.Containers,
+			common.SparkDriverContainerName,
+		)
 
+		// Setup Kubernetes CPU resources for the Connect server container.
+		// spark.driver.cores has no effect because the Connect server runs in client mode.
+		container = util.SetContainerCPUResources(
+			container,
+			util.CPURequestOrCores(conn.Spec.Server.CoreRequest, conn.Spec.Server.Cores),
+			conn.Spec.Server.CoreLimit,
+		)
+
+		// Setup GPU resources.
+		if gpu := conn.Spec.Server.GPU; gpu != nil {
+			util.SetGPUResources(container, gpu.Name, gpu.Quantity)
+		}
 		// Setup image.
 		if container.Image == "" {
 			if conn.Spec.Image == nil || *conn.Spec.Image == "" {
@@ -377,14 +416,16 @@ func (r *Reconciler) mutateServerPod(_ context.Context, conn *v1alpha1.SparkConn
 			container.Image = *conn.Spec.Image
 		}
 
-		// Setup entrypoint.
-		container.Command = []string{"bash", "-c"}
+		// Setup entrypoint. The server script is invoked through a fixed shell
+		// prelude that only resolves SPARK_HOME and the driver host from the
+		// environment; every generated option is passed as its own argument via
+		// "$@", so no user-supplied value is subject to shell interpretation.
+		container.Command = []string{"bash", "-c", sparkConnectServerEntrypointScript, sparkConnectServerProcessName}
 		args, err := buildStartConnectServerArgs(conn)
 		if err != nil {
 			return fmt.Errorf("failed to build spark connection args: %v", err)
 		}
-		container.Args = []string{strings.Join(args, " ")}
-
+		container.Args = args
 		setDefaultSparkConnectServerProbes(container)
 
 		// Setup environment variables.

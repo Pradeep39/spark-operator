@@ -13,8 +13,15 @@ SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
 # Version information.
-VERSION ?= $(shell cat VERSION | sed "s/^v//")
-BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%S%:z")
+VERSION := $(shell cat VERSION | sed "s/^v//")
+# BUILD_DATE defaults to the current time. Set SOURCE_DATE_EPOCH (as CI does)
+# to pin it to a fixed timestamp for reproducible builds.
+BUILD_DATE := $(shell if [ -n "$(SOURCE_DATE_EPOCH)" ]; then \
+                        date -u -d "@$(SOURCE_DATE_EPOCH)" +"%Y-%m-%dT%H:%M:%S%:z" 2>/dev/null \
+                        || date -u -r "$(SOURCE_DATE_EPOCH)" +"%Y-%m-%dT%H:%M:%S%:z"; \
+                      else \
+                        date -u +"%Y-%m-%dT%H:%M:%S%:z"; \
+                      fi)
 GIT_COMMIT := $(shell git rev-parse HEAD)
 GIT_TAG := $(shell if [ -z "`git status --porcelain`" ]; then git describe --exact-match --tags HEAD 2>/dev/null; fi)
 GIT_TREE_STATE := $(shell if [ -z "`git status --porcelain`" ]; then echo "clean" ; else echo "dirty"; fi)
@@ -60,7 +67,7 @@ ENVTEST_VERSION ?= release-0.20
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 GOLANGCI_LINT_VERSION ?= v2.1.6
 GEN_CRD_API_REFERENCE_DOCS_VERSION ?= v0.3.0
-HELM_VERSION ?= $(shell grep -e '^	helm.sh/helm/v3 v' go.mod | cut -d ' ' -f 2)
+HELM_VERSION ?= $(shell grep -e '^[[:space:]]*helm.sh/helm/v3 v' test/e2e/go.mod | cut -d ' ' -f 2)
 HELM_UNITTEST_VERSION ?= 0.8.2
 HELM_DOCS_VERSION ?= v1.14.2
 CODE_GENERATOR_VERSION ?= v0.35.4
@@ -111,13 +118,22 @@ print-%: ; @echo $*=$($*)
 
 CONTROLLER_GEN_PATHS := ./api/...;./internal/...
 
+# Year-less boilerplate header prepended to generated manifests (controller-gen
+# emits none). The boilerplate CI check uses the templates from kubeflow/testing.
+BOILERPLATE_HEADER := hack/boilerplate/boilerplate.sh.txt
+
 .PHONY: manifests
 manifests: controller-gen ## Generate CustomResourceDefinition, RBAC and WebhookConfiguration manifests.
 	$(CONTROLLER_GEN) crd:generateEmbeddedObjectMeta=true rbac:roleName=spark-operator-controller webhook paths="$(CONTROLLER_GEN_PATHS)" output:crd:artifacts:config=config/crd/bases
+	@# controller-gen rewrites these files in full on every run, so prepending
+	@# the header here once is idempotent.
+	@for f in config/crd/bases/*.yaml config/rbac/role.yaml config/webhook/manifests.yaml; do \
+		{ cat $(BOILERPLATE_HEADER); echo; cat "$$f"; } > "$$f.tmp" && mv "$$f.tmp" "$$f"; \
+	done
 
 .PHONY: generate
 generate: controller-gen manifests ## Generate Go code and Python APIs.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="$(CONTROLLER_GEN_PATHS)"
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate/boilerplate.go.txt" paths="$(CONTROLLER_GEN_PATHS)"
 	$(MAKE) python-api
 
 .PHONY: update-crd
@@ -146,7 +162,7 @@ go-clean: ## Clean up caches and output.
 .PHONY: go-fmt
 go-fmt: ## Run go fmt against code.
 	@echo "Running go fmt..."
-	if [ -n "$(shell go fmt ./...)" ]; then \
+	if [ -n "$(shell go fmt ./... && cd test/e2e && go fmt ./...)" ]; then \
 		echo "Go code is not formatted, need to run \"make go-fmt\" and commit the changes."; \
 		false; \
 	else \
@@ -157,16 +173,19 @@ go-fmt: ## Run go fmt against code.
 go-vet: ## Run go vet against code.
 	@echo "Running go vet..."
 	go vet ./...
+	cd test/e2e && go vet ./...
 
 .PHONY: go-lint
 go-lint: golangci-lint ## Run golangci-lint linter.
 	@echo "Running golangci-lint run..."
 	$(GOLANGCI_LINT) run
+	cd test/e2e && $(GOLANGCI_LINT) run --config ../../.golangci.yaml
 
 .PHONY: go-lint-fix
 go-lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes.
 	@echo "Running golangci-lint run --fix..."
 	$(GOLANGCI_LINT) run --fix
+	cd test/e2e && $(GOLANGCI_LINT) run --fix --config ../../.golangci.yaml
 
 # Shell scripts to format and lint (all tracked *.sh files).
 SHELL_SCRIPTS = $(shell git ls-files '*.sh')
@@ -191,7 +210,7 @@ shell-lint: shellcheck ## Lint shell scripts with shellcheck.
 unit-test: setup-envtest ## Run unit tests.
 	@echo "Running unit tests..."
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)"
-	go test $(shell go list ./... | grep -v -e /e2e -e /drift) -coverprofile cover.out
+	go test $(shell go list ./... | grep -v -e /drift) -coverprofile cover.out
 	@echo "Generating HTML coverage report..."
 	go tool cover -html=cover.out -o cover.html
 	@echo "Coverage report available at cover.html"
@@ -200,16 +219,17 @@ unit-test: setup-envtest ## Run unit tests.
 e2e-test: IMAGE_TAG=local
 e2e-test: envtest kind-load-image kind-load-spark-image ## Run the e2e tests against a Kind k8s instance that is spun up.
 	@echo "Running e2e tests (deploy_method=$(DEPLOY_METHOD))..."
-	DEPLOY_METHOD=$(DEPLOY_METHOD) IMAGE_TAG=$(IMAGE_TAG) KUBECONFIG=$(KIND_KUBE_CONFIG) go test ./test/e2e/ -v -ginkgo.v -timeout 30m
+	cd test/e2e && DEPLOY_METHOD=$(DEPLOY_METHOD) IMAGE_TAG=$(IMAGE_TAG) KUBECONFIG=$(KIND_KUBE_CONFIG) go test ./... -v -ginkgo.v -timeout 30m
 
 ##@ Kustomize
 
 .PHONY: kustomize-set-image
-kustomize-set-image: ## Update config/default/kustomization.yaml image tag from VERSION file.
+kustomize-set-image: ## Update the Kustomize image tag and public ConfigMap version from VERSION file.
 	@TAG=$$(cat VERSION) && \
 	sed -i.bak "s|    newTag: .*|    newTag: $$TAG|" config/default/kustomization.yaml && \
-	rm -f config/default/kustomization.yaml.bak && \
-	echo "Updated kustomize image tag to $$TAG"
+	sed -i.bak "s|      - kubeflow_spark_version=.*|      - kubeflow_spark_version=$$TAG|" config/public/kustomization.yaml && \
+	rm -f config/default/kustomization.yaml.bak config/public/kustomization.yaml.bak && \
+	echo "Updated kustomize image tag and kubeflow_spark_version to $$TAG"
 
 .PHONY: kustomize-lint
 kustomize-lint: ## Validate Kustomize build output (no cluster needed).
@@ -238,7 +258,7 @@ clean: ## Clean binaries.
 build-api-docs: gen-crd-api-reference-docs ## Build api documentation.
 	$(GEN_CRD_API_REFERENCE_DOCS) \
 	-config hack/api-docs/config.json \
-	-api-dir github.com/kubeflow/spark-operator/v2/api/v1beta2 \
+	-api-dir github.com/kubeflow/spark-operator/v2/api \
 	-template-dir hack/api-docs/template \
 	-out-file docs/api-docs.md
 
@@ -337,12 +357,15 @@ kind-load-image: kind-create-cluster docker-build ## Load the image into the kin
 # SPARK_IMAGE is the Spark runtime image used by drivers/executors. Defaults to
 # the same tag used by examples/spark-pi.yaml so manual e2e checks line up with
 # the canonical example. Override on the command line if you need a different one.
-SPARK_IMAGE ?= docker.io/library/spark:4.0.1
+SPARK_IMAGE ?= docker.io/apache/spark:4.0.4@sha256:7112c0c0ca07b7d2605163ba91a05e53af39ba7cfcf9886e63141ade3f850456
 
 .PHONY: kind-load-spark-image
 kind-load-spark-image: kind-create-cluster ## Pull the Spark runtime image and load it into the kind cluster.
 	docker image inspect $(SPARK_IMAGE) >/dev/null 2>&1 || docker pull $(SPARK_IMAGE)
-	$(KIND) load docker-image --name $(KIND_CLUSTER_NAME) $(SPARK_IMAGE)
+	# Docker 29 keeps only the host platform of multi-platform images, which `kind load docker-image` can't import.
+	docker save --platform $$(docker version -f '{{.Server.Os}}/{{.Server.Arch}}') -o $(LOCALBIN)/spark-image.tar $(SPARK_IMAGE)
+	$(KIND) load image-archive --name $(KIND_CLUSTER_NAME) $(LOCALBIN)/spark-image.tar
+	rm -f $(LOCALBIN)/spark-image.tar
 
 .PHONY: kind-delete-cluster
 kind-delete-cluster: kind ## Delete the created kind cluster.

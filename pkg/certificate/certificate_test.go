@@ -1,11 +1,11 @@
 /*
-Copyright 2024 The Kubeflow authors.
+Copyright 2024 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -74,11 +74,6 @@ var _ = Describe("Certificate Provider", func() {
 			Expect(serverCert).NotTo(BeEmpty())
 		})
 
-		It("Should generate new TLS config", func() {
-			cfg, err := cp.ServerCert()
-			Expect(err).To(BeNil())
-			Expect(cfg).NotTo(BeEmpty())
-		})
 	})
 
 	Context("The data of webhook secret is empty", func() {

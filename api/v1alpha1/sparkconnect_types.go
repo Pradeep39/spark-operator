@@ -1,11 +1,11 @@
 /*
-Copyright 2025 The Kubeflow authors.
+Copyright 2025 The Kubeflow Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -32,6 +33,7 @@ func init() {
 // +kubebuilder:printcolumn:JSONPath=.metadata.creationTimestamp,name=Age,type=date
 // +kubebuilder:printcolumn:JSONPath=.status.state,name="Status",type=string
 // +kubebuilder:printcolumn:JSONPath=.status.server.podName,name="PodName",type=string
+// +genclient
 
 // SparkConnect is the Schema for the sparkconnections API.
 type SparkConnect struct {
@@ -72,6 +74,10 @@ type SparkConnectSpec struct {
 	// +optional
 	SparkConf map[string]string `json:"sparkConf,omitempty"`
 
+	// Deps captures all possible types of dependencies of a Spark Connect server.
+	// +optional
+	Deps Dependencies `json:"deps,omitempty"`
+
 	// Server is the Spark connect server specification.
 	Server ServerSpec `json:"server"`
 
@@ -105,14 +111,27 @@ type ExecutorSpec struct {
 
 // SparkPodSpec defines common things that can be customized for a Spark driver or executor pod.
 type SparkPodSpec struct {
-	// Cores maps to `spark.driver.cores` or `spark.executor.cores` for the driver and executors, respectively.
+	// Cores is a shorthand for coreRequest on the server, and maps to `spark.executor.cores` for executors.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	Cores *int32 `json:"cores,omitempty"`
 
+	// CoreRequest is the physical CPU core request for the pod.
+	// +optional
+	CoreRequest *resource.Quantity `json:"coreRequest,omitempty"`
+
+	// CoreLimit is the physical CPU core limit for the pod.
+	// +optional
+	CoreLimit *resource.Quantity `json:"coreLimit,omitempty"`
+
 	// Memory is the amount of memory to request for the pod.
 	// +optional
 	Memory *string `json:"memory,omitempty"`
+
+	// GPU specifies GPU resources for the pod and Spark resource scheduler.
+	// GPU discovery and per-task resource settings are configured through SparkConf.
+	// +optional
+	GPU *GPUSpec `json:"gpu,omitempty"`
 
 	// Template is a pod template that can be used to define the driver or executor pod configurations that Spark configurations do not support.
 	// Spark version >= 3.0.0 is required.
@@ -122,6 +141,30 @@ type SparkPodSpec struct {
 	// +kubebuilder:validation:Type:=object
 	// +kubebuilder:pruning:PreserveUnknownFields
 	Template *corev1.PodTemplateSpec `json:"template,omitempty"`
+}
+
+// GPUSpec defines the GPU resources requested for a Spark Connect server or executor pod.
+//
+// Name must be a Kubernetes extended resource name of the form
+// "<vendor-domain>/gpu", for example "nvidia.com/gpu" or "amd.com/gpu".
+// The vendor domain is passed to Spark as
+// spark.{driver,executor}.resource.gpu.vendor, and the quantity as
+// spark.{driver,executor}.resource.gpu.amount. GPU resource names whose
+// suffix is not "gpu" (for example MIG profiles) are not supported by this
+// field; configure them through the pod template and sparkConf instead.
+//
+// Setting a GPU does not configure GPU discovery. A discovery script or
+// discovery plugin must be provided through sparkConf for Spark to start.
+type GPUSpec struct {
+	// Name is the Kubernetes GPU resource name, such as nvidia.com/gpu or amd.com/gpu.
+	// The vendor domain is used for Spark's GPU resource vendor configuration.
+	// +kubebuilder:validation:MaxLength=257
+	// +kubebuilder:validation:Pattern="^([a-z0-9]([-a-z0-9]*[a-z0-9])?\\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?/gpu$"
+	Name string `json:"name"`
+
+	// Quantity is the number of GPUs to request for each pod.
+	// +kubebuilder:validation:Minimum=1
+	Quantity int64 `json:"quantity"`
 }
 
 // SparkConnectStatus defines the observed state of SparkConnect.
