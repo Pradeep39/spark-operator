@@ -366,6 +366,16 @@ var _ = Describe("IsExecutorTerminated", func() {
 	})
 })
 
+var _ = Describe("IsExecutorActive", func() {
+	It("Should check whether executor is pending or running", func() {
+		Expect(util.IsExecutorActive(v1beta2.ExecutorStatePending)).To(BeTrue())
+		Expect(util.IsExecutorActive(v1beta2.ExecutorStateRunning)).To(BeTrue())
+		Expect(util.IsExecutorActive(v1beta2.ExecutorStateCompleted)).To(BeFalse())
+		Expect(util.IsExecutorActive(v1beta2.ExecutorStateFailed)).To(BeFalse())
+		Expect(util.IsExecutorActive(v1beta2.ExecutorStateUnknown)).To(BeFalse())
+	})
+})
+
 var _ = Describe("DriverStateToApplicationState", func() {
 	It("Should convert driver state to application state correctly", func() {
 		Expect(util.DriverStateToApplicationState(v1beta2.DriverStatePending)).To(Equal(v1beta2.ApplicationStateSubmitted))

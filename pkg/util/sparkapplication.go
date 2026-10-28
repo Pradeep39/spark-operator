@@ -400,6 +400,11 @@ func IsExecutorTerminated(executorState v1beta2.ExecutorState) bool {
 	return executorState == v1beta2.ExecutorStateCompleted || executorState == v1beta2.ExecutorStateFailed
 }
 
+// IsExecutorActive returns whether the executor is pending or running.
+func IsExecutorActive(executorState v1beta2.ExecutorState) bool {
+	return executorState == v1beta2.ExecutorStatePending || executorState == v1beta2.ExecutorStateRunning
+}
+
 // DriverStateToApplicationState converts driver state to application state.
 func DriverStateToApplicationState(driverState v1beta2.DriverState) v1beta2.ApplicationStateType {
 	switch driverState {
