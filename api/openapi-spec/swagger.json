@@ -14634,6 +14634,11 @@
             "type": "integer",
             "format": "int64"
           },
+          "readyExecutors": {
+            "description": "ReadyExecutors is the number of executor pods which are running and ready, and not being deleted. Unlike ActiveExecutors, it leaves out pending executors and those being removed, so it tells whether the executors have started. It is counted from the pods, so it stays exact beyond MaxTrackedExecutorPerApp.",
+            "type": "integer",
+            "format": "int32"
+          },
           "sparkApplicationId": {
             "description": "SparkApplicationID is set by the spark-distribution(via spark.app.id config) on the driver and executor pods",
             "type": "string"

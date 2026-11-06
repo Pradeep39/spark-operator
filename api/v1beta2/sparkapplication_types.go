@@ -191,6 +191,12 @@ type SparkApplicationStatus struct {
 	// so it stays exact beyond MaxTrackedExecutorPerApp.
 	// +optional
 	ActiveExecutors *int32 `json:"activeExecutors,omitempty"`
+	// ReadyExecutors is the number of executor pods which are running and ready, and not being
+	// deleted. Unlike ActiveExecutors, it leaves out pending executors and those being removed, so it
+	// tells whether the executors have started. It is counted from the pods, so it stays exact beyond
+	// MaxTrackedExecutorPerApp.
+	// +optional
+	ReadyExecutors *int32 `json:"readyExecutors,omitempty"`
 	// MaxExecutorID is the highest executor ID seen so far. It never decreases until the status is reset
 	// for a new attempt, so it changes with every scale-up.
 	// +optional

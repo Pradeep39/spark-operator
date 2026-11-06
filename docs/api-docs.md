@@ -3954,6 +3954,21 @@ so it stays exact beyond MaxTrackedExecutorPerApp.</p>
 </tr>
 <tr>
 <td>
+<code>readyExecutors</code><br/>
+<em>
+int32
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>ReadyExecutors is the number of executor pods which are running and ready, and not being
+deleted. Unlike ActiveExecutors, it leaves out pending executors and those being removed, so it
+tells whether the executors have started. It is counted from the pods, so it stays exact beyond
+MaxTrackedExecutorPerApp.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>maxExecutorId</code><br/>
 <em>
 int64

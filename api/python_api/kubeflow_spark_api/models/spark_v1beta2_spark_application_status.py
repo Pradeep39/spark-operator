@@ -50,11 +50,12 @@ class SparkV1beta2SparkApplicationStatus(BaseModel):
     executor_state: Optional[Dict[str, StrictStr]] = Field(default=None, description="ExecutorState records the state of executors by executor Pod names.", alias="executorState")
     last_submission_attempt_time: Optional[datetime] = Field(default=None, description="LastSubmissionAttemptTime is the time for the last application submission attempt.", alias="lastSubmissionAttemptTime")
     max_executor_id: Optional[StrictInt] = Field(default=None, description="MaxExecutorID is the highest executor ID seen so far. It never decreases until the status is reset for a new attempt, so it changes with every scale-up.", alias="maxExecutorId")
+    ready_executors: Optional[StrictInt] = Field(default=None, description="ReadyExecutors is the number of executor pods which are running and ready, and not being deleted. Unlike ActiveExecutors, it leaves out pending executors and those being removed, so it tells whether the executors have started. It is counted from the pods, so it stays exact beyond MaxTrackedExecutorPerApp.", alias="readyExecutors")
     spark_application_id: Optional[StrictStr] = Field(default=None, description="SparkApplicationID is set by the spark-distribution(via spark.app.id config) on the driver and executor pods", alias="sparkApplicationId")
     submission_attempts: Optional[StrictInt] = Field(default=None, description="SubmissionAttempts is the total number of attempts to submit an application to run. Incremented upon each attempted submission of the application and reset upon invalidation and rerun.", alias="submissionAttempts")
     submission_id: Optional[StrictStr] = Field(default=None, description="SubmissionID is a unique ID of the current submission of the application.", alias="submissionID")
     termination_time: Optional[datetime] = Field(default=None, description="CompletionTime is the time when the application runs to completion if it does.", alias="terminationTime")
-    __properties: ClassVar[List[str]] = ["activeExecutors", "applicationState", "driverInfo", "executionAttempts", "executorState", "lastSubmissionAttemptTime", "maxExecutorId", "sparkApplicationId", "submissionAttempts", "submissionID", "terminationTime"]
+    __properties: ClassVar[List[str]] = ["activeExecutors", "applicationState", "driverInfo", "executionAttempts", "executorState", "lastSubmissionAttemptTime", "maxExecutorId", "readyExecutors", "sparkApplicationId", "submissionAttempts", "submissionID", "terminationTime"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -120,6 +121,7 @@ class SparkV1beta2SparkApplicationStatus(BaseModel):
             "executorState": obj.get("executorState"),
             "lastSubmissionAttemptTime": obj.get("lastSubmissionAttemptTime"),
             "maxExecutorId": obj.get("maxExecutorId"),
+            "readyExecutors": obj.get("readyExecutors"),
             "sparkApplicationId": obj.get("sparkApplicationId"),
             "submissionAttempts": obj.get("submissionAttempts"),
             "submissionID": obj.get("submissionID"),

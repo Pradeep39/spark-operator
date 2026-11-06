@@ -886,6 +886,11 @@ func (in *SparkApplicationStatus) DeepCopyInto(out *SparkApplicationStatus) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.ReadyExecutors != nil {
+		in, out := &in.ReadyExecutors, &out.ReadyExecutors
+		*out = new(int32)
+		**out = **in
+	}
 	if in.MaxExecutorID != nil {
 		in, out := &in.MaxExecutorID, &out.MaxExecutorID
 		*out = new(int64)

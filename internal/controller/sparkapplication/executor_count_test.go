@@ -50,6 +50,12 @@ func executorPodWithPhase(appName string, id int, phase corev1.PodPhase) *corev1
 	}
 }
 
+func readyExecutorPod(appName string, id int) *corev1.Pod {
+	pod := executorPodWithPhase(appName, id, corev1.PodRunning)
+	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	return pod
+}
+
 func newExecutorCountReconciler(t *testing.T, maxTracked int, pods ...*corev1.Pod) *Reconciler {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -93,17 +99,41 @@ func TestUpdateExecutorStateCountsActiveExecutors(t *testing.T) {
 
 func TestUpdateExecutorStateCountsBeyondMaxTrackedExecutorPerApp(t *testing.T) {
 	r := newExecutorCountReconciler(t, 1,
-		executorPodWithPhase("app", 1, corev1.PodRunning),
-		executorPodWithPhase("app", 2, corev1.PodRunning),
-		executorPodWithPhase("app", 3, corev1.PodPending),
+		readyExecutorPod("app", 1),
+		readyExecutorPod("app", 2),
+		readyExecutorPod("app", 3),
+		executorPodWithPhase("app", 4, corev1.PodPending),
 	)
 	app := runningApp("app")
 
 	require.NoError(t, r.updateExecutorState(context.Background(), app))
 
 	assert.Len(t, app.Status.ExecutorState, 1)
-	assert.Equal(t, ptr.To[int32](3), app.Status.ActiveExecutors)
-	assert.Equal(t, ptr.To[int64](3), app.Status.MaxExecutorID)
+	assert.Equal(t, ptr.To[int32](4), app.Status.ActiveExecutors)
+	assert.Equal(t, ptr.To[int32](3), app.Status.ReadyExecutors)
+	assert.Equal(t, ptr.To[int64](4), app.Status.MaxExecutorID)
+}
+
+func TestUpdateExecutorStateCountsReadyExecutors(t *testing.T) {
+	deleting := readyExecutorPod("app", 3)
+	deleting.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+	deleting.Finalizers = []string{"test"} // the fake client keeps an object being deleted only with a finalizer
+	notReady := executorPodWithPhase("app", 2, corev1.PodRunning)
+	notReady.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionFalse}}
+	r := newExecutorCountReconciler(t, 1000,
+		readyExecutorPod("app", 1),
+		notReady,
+		deleting,
+		executorPodWithPhase("app", 4, corev1.PodPending),
+		executorPodWithPhase("app", 5, corev1.PodSucceeded),
+		readyExecutorPod("other", 9),
+	)
+	app := runningApp("app")
+
+	require.NoError(t, r.updateExecutorState(context.Background(), app))
+
+	assert.Equal(t, ptr.To[int32](4), app.Status.ActiveExecutors)
+	assert.Equal(t, ptr.To[int32](1), app.Status.ReadyExecutors)
 }
 
 func TestUpdateExecutorStateLeavesBothUnsetWithoutExecutors(t *testing.T) {
@@ -113,6 +143,7 @@ func TestUpdateExecutorStateLeavesBothUnsetWithoutExecutors(t *testing.T) {
 	require.NoError(t, r.updateExecutorState(context.Background(), app))
 
 	assert.Nil(t, app.Status.ActiveExecutors)
+	assert.Nil(t, app.Status.ReadyExecutors)
 	assert.Nil(t, app.Status.MaxExecutorID)
 }
 
@@ -133,7 +164,7 @@ func TestUpdateExecutorStateKeepsTheHighestExecutorIDWhenExecutorsGo(t *testing.
 	assert.Equal(t, ptr.To[int64](7), app.Status.MaxExecutorID)
 }
 
-func TestResetSparkApplicationStatusClearsActiveExecutorsAndMaxExecutorID(t *testing.T) {
+func TestResetSparkApplicationStatusClearsTheExecutorCountsAndMaxExecutorID(t *testing.T) {
 	for _, state := range []v1beta2.ApplicationStateType{
 		v1beta2.ApplicationStateSucceeding,
 		v1beta2.ApplicationStateFailing,
@@ -144,11 +175,13 @@ func TestResetSparkApplicationStatusClearsActiveExecutorsAndMaxExecutorID(t *tes
 			app := runningApp("app")
 			app.Status.AppState.State = state
 			app.Status.ActiveExecutors = ptr.To[int32](3)
+			app.Status.ReadyExecutors = ptr.To[int32](2)
 			app.Status.MaxExecutorID = ptr.To[int64](9)
 
 			(&Reconciler{}).resetSparkApplicationStatus(app)
 
 			assert.Nil(t, app.Status.ActiveExecutors)
+			assert.Nil(t, app.Status.ReadyExecutors)
 			assert.Nil(t, app.Status.MaxExecutorID)
 		})
 	}

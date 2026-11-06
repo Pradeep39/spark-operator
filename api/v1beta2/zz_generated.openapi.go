@@ -2619,6 +2619,13 @@ func schema_spark_operator_v2_api_v1beta2_SparkApplicationStatus(ref common.Refe
 							Format:      "int32",
 						},
 					},
+					"readyExecutors": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReadyExecutors is the number of executor pods which are running and ready, and not being deleted. Unlike ActiveExecutors, it leaves out pending executors and those being removed, so it tells whether the executors have started. It is counted from the pods, so it stays exact beyond MaxTrackedExecutorPerApp.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
 					"maxExecutorId": {
 						SchemaProps: spec.SchemaProps{
 							Description: "MaxExecutorID is the highest executor ID seen so far. It never decreases until the status is reset for a new attempt, so it changes with every scale-up.",
